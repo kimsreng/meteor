@@ -83,19 +83,22 @@ LocalCollection.Cursor = function (collection, selector, options) {
 
   self.collection = collection;
   self.sorter = null;
+  self.matcher = new Minimongo.Matcher(selector);
 
   if (LocalCollection._selectorIsId(selector)) {
     // stash for fast path
     self._selectorId = selector;
-    self.matcher = new Minimongo.Matcher(selector);
+  } else if (LocalCollection._selectorIsIdPerhapsAsObject(selector)) {
+    // also do the fast path for { _id: idString }
+    self._selectorId = selector._id;
   } else {
     self._selectorId = undefined;
-    self.matcher = new Minimongo.Matcher(selector);
     if (self.matcher.hasGeoQuery() || options.sort) {
       self.sorter = new Minimongo.Sorter(options.sort || [],
                                          { matcher: self.matcher });
     }
   }
+
   self.skip = options.skip;
   self.limit = options.limit;
   self.fields = options.fields;
@@ -235,7 +238,11 @@ LocalCollection.Cursor.prototype._publishCursor = function (sub) {
   var collection = self.collection.name;
 
   // XXX minimongo should not depend on mongo-livedata!
-  return Mongo.Collection._publishCursor(self, sub, collection);
+  if (! Package.mongo) {
+    throw new Error("Can't publish from Minimongo without the `mongo` package.");
+  }
+
+  return Package.mongo.Mongo.Collection._publishCursor(self, sub, collection);
 };
 
 LocalCollection.Cursor.prototype._getCollectionName = function () {
@@ -690,11 +697,51 @@ LocalCollection.prototype.update = function (selector, mod, options, callback) {
   // they already have a resultsSnapshot and we won't be diffing in
   // _recomputeResults.)
   var qidToOriginalResults = {};
+  // We should only clone each document once, even if it appears in multiple queries
+  var docMap = new LocalCollection._IdMap;
+  var idsMatchedBySelector = LocalCollection._idsMatchedBySelector(selector);
+
   _.each(self.queries, function (query, qid) {
-    // XXX for now, skip/limit implies ordered observe, so query.results is
-    // always an array
-    if ((query.cursor.skip || query.cursor.limit) && ! self.paused)
-      qidToOriginalResults[qid] = EJSON.clone(query.results);
+    if ((query.cursor.skip || query.cursor.limit) && ! self.paused) {
+      // Catch the case of a reactive `count()` on a cursor with skip
+      // or limit, which registers an unordered observe. This is a
+      // pretty rare case, so we just clone the entire result set with
+      // no optimizations for documents that appear in these result
+      // sets and other queries.
+      if (query.results instanceof LocalCollection._IdMap) {
+        qidToOriginalResults[qid] = query.results.clone();
+        return;
+      }
+
+      if (!(query.results instanceof Array)) {
+        throw new Error("Assertion failed: query.results not an array");
+      }
+
+      // Clones a document to be stored in `qidToOriginalResults`
+      // because it may be modified before the new and old result sets
+      // are diffed. But if we know exactly which document IDs we're
+      // going to modify, then we only need to clone those.
+      var memoizedCloneIfNeeded = function(doc) {
+        if (docMap.has(doc._id)) {
+          return docMap.get(doc._id);
+        } else {
+          var docToMemoize;
+
+          if (idsMatchedBySelector && !_.any(idsMatchedBySelector, function(id) {
+            return EJSON.equals(id, doc._id);
+          })) {
+            docToMemoize = doc;
+          } else {
+            docToMemoize = EJSON.clone(doc);
+          }
+
+          docMap.set(doc._id, docToMemoize);
+          return docToMemoize;
+        }
+      };
+
+      qidToOriginalResults[qid] = query.results.map(memoizedCloneIfNeeded);
+    }
   });
   var recomputeQids = {};
 

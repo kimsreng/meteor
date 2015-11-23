@@ -4,7 +4,7 @@ var net = require("net");
 var eachline = require("eachline");
 var chalk = require("chalk");
 var EOL = require("os").EOL;
-var server = require("./server/shell-server.js");
+var server = require('./static-assets/server/shell-server.js');
 var EXITING_MESSAGE = server.EXITING_MESSAGE;
 var getInfoFile = server.getInfoFile;
 
@@ -81,9 +81,44 @@ Cp.connect = function connect() {
   });
 };
 
+Cp.setUpSocketForSingleUse = function (sock, key) {
+  sock.on("connect", function () {
+    const inputBuffers = [];
+    process.stdin.on("data", buffer => inputBuffers.push(buffer));
+    process.stdin.on("end", () => {
+      sock.write(JSON.stringify({
+        evaluateAndExit: {
+          // Make sure the entire command is written as a string within a
+          // JSON object, so that the server can easily tell when it has
+          // received the whole command.
+          command: Buffer.concat(inputBuffers).toString("utf8")
+        },
+        terminal: false,
+        key: key
+      }) + "\n");
+    });
+  });
+
+  const outputBuffers = [];
+  sock.on("data", buffer => outputBuffers.push(buffer));
+  sock.on("close", function () {
+    var output = JSON.parse(Buffer.concat(outputBuffers));
+    if (output.error) {
+      console.error(output.error);
+      process.exit(output.code);
+    } else {
+      process.stdout.write(JSON.stringify(output.result) + "\n");
+      process.exit(0);
+    }
+  });
+};
+
 Cp.setUpSocket = function setUpSocket(sock, key) {
-  var self = this;
-  self.sock = sock;
+  const self = this;
+
+  if (! process.stdin.isTTY) {
+    return self.setUpSocketForSingleUse(sock, key);
+  }
 
   // Put STDIN into "flowing mode":
   // http://nodejs.org/api/stream.html#stream_compatibility_with_older_node_versions
@@ -103,7 +138,9 @@ Cp.setUpSocket = function setUpSocket(sock, key) {
 
     process.stderr.write(shellBanner());
     process.stdin.pipe(sock);
-    process.stdin.setRawMode(true);
+    if (process.stdin.setRawMode) { // https://github.com/joyent/node/issues/8204
+      process.stdin.setRawMode(true);
+    }
   }
 
   function onClose() {
@@ -125,7 +162,9 @@ Cp.setUpSocket = function setUpSocket(sock, key) {
 
   function tearDown() {
     self.connected = false;
-    process.stdin.setRawMode(false);
+    if (process.stdin.setRawMode) { // https://github.com/joyent/node/issues/8204
+      process.stdin.setRawMode(false);
+    }
     process.stdin.unpipe(sock);
     sock.unpipe(process.stdout);
     sock.removeListener("connect", onConnect);

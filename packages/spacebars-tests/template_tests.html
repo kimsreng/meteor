@@ -1061,6 +1061,14 @@ Hi there!
   {{/with}}
 </template>
 
+<template name="spacebars_template_test_new_each_data_context_subexpr">
+  {{#with dataContext}}
+    {{#each item in (items)}}
+      <div>{{item.text}} -- {{toplevel}}</div>
+    {{/each}}
+  {{/with}}
+</template>
+
 <template name="spacebars_template_test_new_each_lookup_top_level">
   {{#with dataContext}}
     {{#each item in letter_a}}
@@ -1128,5 +1136,21 @@ Hi there!
 <template name="spacebars_template_test_each_multiarg">
   {{#each helper arg}}
     <div>{{this}}</div>
+  {{/each}}
+</template>
+
+<template name="spacebars_template_test_lexical_leakage">
+  {{#each list}}
+    <div><span>{{@index}}</span>{{> spacebars_template_test_get_index}}</div>
+  {{/each}}
+</template>
+
+<template name="spacebars_template_test_get_index">
+  <span>{{@index}}</span>
+</template>
+
+<template name="spacebars_template_test_each_in_multi_args">
+  {{#each item in helper list}}
+    <div>{{item}}</div>
   {{/each}}
 </template>

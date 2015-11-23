@@ -326,10 +326,13 @@ or the DOM API.
 `Template.dynamic` allows you to include a template by name, where the name
 may be calculated by a helper and may change reactively.  The `data`
 argument is optional, and if it is omitted, the current data context
-is used.
+is used. It's also possible, to use `Template.dynamic` as a block helper
+(`{{#Template.dynamic}} ... {{/Template.dynamic}}`)
 
 For example, if there is a template named "foo", `{{dstache}}> Template.dynamic
-template="foo"}}` is equivalent to `{{dstache}}> foo}}`.
+template="foo"}}` is equivalent to `{{dstache}}> foo}}` and
+`{{dstache}}#Template.dynamic template="foo"}} ... {{dstache}}/Template.dynamic}}`
+is equivalent to `{{dstache}}#foo}} ... {{dstache}}/foo}}`.
 
 {{> apiBoxTitle name="Event Maps" id="eventmaps"}}
 
@@ -502,6 +505,6 @@ browsers.
 
 Spacebars is the language used to write Meteor templates. It is inspired by [Handlebars](http://handlebarsjs.com/). It shares some of the spirit and syntax of Handlebars, but has been tailored to produce reactive Meteor templates when compiled.
 
-For more information about Spacebars, see the [Spacebars README](https://github.com/meteor/meteor/blob/devel/packages/spacebars/README.md).
+For more information about Spacebars, see the [Spacebars README](https://github.com/meteor/meteor/blob/master/packages/spacebars/README.md).
 
 {{/template}}

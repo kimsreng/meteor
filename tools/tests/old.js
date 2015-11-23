@@ -1,15 +1,16 @@
 var _ = require('underscore');
 var Future = require('fibers/future');
-var selftest = require('../selftest.js');
+var selftest = require('../tool-testing/selftest.js');
 var Sandbox = selftest.Sandbox;
 var Run = selftest.Run;
-var files = require('../files.js');
-var release = require('../release.js');
+var files = require('../fs/files.js');
+var release = require('../packaging/release.js');
 
 // old tests don't get to test --release, and always run this release
 var maybeFixRelease = function (env) {
-  if (release.current && release.current.isProperRelease())
+  if (release.current && release.current.isProperRelease()) {
     env.METEOR_SPRINGBOARD_RELEASE = release.current.name;
+  }
   return env;
 };
 

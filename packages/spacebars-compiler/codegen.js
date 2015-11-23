@@ -33,6 +33,12 @@ var builtInTemplateMacros = {
   'subscriptionsReady': 'view.templateInstance().subscriptionsReady()'
 };
 
+var additionalReservedNames = ["body", "toString", "instance",  "constructor",
+  "toString", "toLocaleString", "valueOf", "hasOwnProperty", "isPrototypeOf",
+  "propertyIsEnumerable", "__defineGetter__", "__lookupGetter__",
+  "__defineSetter__", "__lookupSetter__", "__proto__", "dynamic",
+  "registerHelper", "currentData", "parentData"];
+
 // A "reserved name" can't be used as a <template> name.  This
 // function is used by the template file scanner.
 //
@@ -41,7 +47,8 @@ var builtInTemplateMacros = {
 // like "toString".
 SpacebarsCompiler.isReservedName = function (name) {
   return builtInBlockHelpers.hasOwnProperty(name) ||
-    builtInTemplateMacros.hasOwnProperty(name);
+    builtInTemplateMacros.hasOwnProperty(name) ||
+    _.indexOf(additionalReservedNames, name) > -1;
 };
 
 var makeObjectLiteral = function (obj) {
@@ -104,8 +111,8 @@ _.extend(CodeGen.prototype, {
             var eachUsage = "Use either {{#each items}} or " +
                   "{{#each item in items}} form of #each.";
             var inArg = args[1];
-            if (! (args.length === 3 && inArg[1].length === 1)) {
-              // we don't have 3 space-separated parts after #each, or
+            if (! (args.length >= 3 && inArg[1].length === 1)) {
+              // we don't have at least 3 space-separated parts after #each, or
               // inArg doesn't look like ['PATH',['in']]
               throw new Error("Malformed #each. " + eachUsage);
             }
@@ -116,9 +123,9 @@ _.extend(CodeGen.prototype, {
               throw new Error("Bad variable name in #each");
             }
             var variable = variableArg[1][0];
-            dataCode = 'function () { return { _sequence: Spacebars.call(' +
-              self.codeGenPath(args[2][1]) +
-              '), _variable: ' + BlazeTools.toJSLiteral(variable) + ' }; }';
+            dataCode = 'function () { return { _sequence: ' +
+              self.codeGenInclusionData(args.slice(2)) +
+              ', _variable: ' + BlazeTools.toJSLiteral(variable) + ' }; }';
           } else if (path[0] === 'let') {
             var dataProps = {};
             _.each(args, function (arg) {
@@ -337,10 +344,8 @@ _.extend(CodeGen.prototype, {
     return SpacebarsCompiler.codeGen(content);
   },
 
-  codeGenInclusionDataFunc: function (args) {
+  codeGenInclusionData: function (args) {
     var self = this;
-
-    var dataFuncCode = null;
 
     if (! args.length) {
       // e.g. `{{#foo}}`
@@ -352,24 +357,33 @@ _.extend(CodeGen.prototype, {
         var argKey = arg[2];
         dataProps[argKey] = 'Spacebars.call(' + self.codeGenArgValue(arg) + ')';
       });
-      dataFuncCode = makeObjectLiteral(dataProps);
+      return makeObjectLiteral(dataProps);
     } else if (args[0][0] !== 'PATH') {
       // literal first argument, e.g. `{{> foo "blah"}}`
       //
       // tag validation has confirmed, in this case, that there is only
       // one argument (`args.length === 1`)
-      dataFuncCode = self.codeGenArgValue(args[0]);
+      return self.codeGenArgValue(args[0]);
     } else if (args.length === 1) {
       // one argument, must be a PATH
-      dataFuncCode = 'Spacebars.call(' + self.codeGenPath(args[0][1]) + ')';
+      return 'Spacebars.call(' + self.codeGenPath(args[0][1]) + ')';
     } else {
       // Multiple positional arguments; treat them as a nested
       // "data mustache"
-      dataFuncCode = self.codeGenMustache(args[0][1], args.slice(1),
-                                          'dataMustache');
+      return self.codeGenMustache(args[0][1], args.slice(1),
+                                  'dataMustache');
     }
 
-    return 'function () { return ' + dataFuncCode + '; }';
+  },
+
+  codeGenInclusionDataFunc: function (args) {
+    var self = this;
+    var dataCode = self.codeGenInclusionData(args);
+    if (dataCode) {
+      return 'function () { return ' + dataCode + '; }';
+    } else {
+      return null;
+    }
   }
 
 });

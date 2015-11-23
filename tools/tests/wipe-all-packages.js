@@ -1,8 +1,8 @@
-var selftest = require('../selftest.js');
+var selftest = require('../tool-testing/selftest.js');
 var Sandbox = selftest.Sandbox;
-var files = require("../files.js");
-var utils = require("../utils.js");
-var archinfo = require("../archinfo.js");
+var files = require('../fs/files.js');
+var utils = require('../utils/utils.js');
+var archinfo = require('../utils/archinfo.js');
 var _ = require('underscore');
 
 selftest.define("wipe all packages", function () {
@@ -28,6 +28,7 @@ selftest.define("wipe all packages", function () {
       published: null,
       isTest: false,
       debugOnly: false,
+      prodOnly: false,
       containsPlugins: false
     };
   };
@@ -139,11 +140,14 @@ selftest.define("wipe all packages", function () {
 
   // Check that all other packages are wiped
   _.each(files.readdir(files.pathJoin(s.warehouse, 'packages')), function (p) {
-    if (p[0] === '.') return;
-    if (p === 'meteor-tool') return;
+    if (p[0] === '.') {
+      return;
+    }
+    if (p === 'meteor-tool') {
+      return;
+    }
     var contents = files.readdir(files.pathJoin(s.warehouse, 'packages', p));
     contents = _.filter(contents, notHidden);
     selftest.expectTrue(contents.length === 0);
   });
 });
-

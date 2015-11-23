@@ -12,8 +12,13 @@ The Meteor server stores passwords using the
 protect against embarrassing password leaks if the server's database is
 compromised.
 
-To add password support to your application, run `$ meteor add
-accounts-password`. You can construct your own user interface using the
+To add password support to your application, run this command in your terminal:
+
+```bash
+meteor add accounts-password
+```
+
+You can construct your own user interface using the
 functions below, or use the [`accounts-ui` package](#accountsui) to
 include a turn-key user interface for password-based sign-in.
 
@@ -26,9 +31,10 @@ id.
 
 On the client, you must pass `password` and at least one of `username` or
 `email` &mdash; enough information for the user to be able to log in again
-later. On the server, you do not need to specify `password`, but the user will
-not be able to log in until it has a password (eg, set with
-[`Accounts.setPassword`](#accounts_setpassword)).
+later. If there are existing users with a username or email only differing in
+case, `createUser` will fail. On the server, you do not need to specify
+`password`, but the user will not be able to log in until it has a password (eg,
+set with [`Accounts.setPassword`](#accounts_setpassword)).
 
 To create an account without a password on the server and still let the
 user pick their own password, call `createUser` with the `email` option
@@ -42,6 +48,35 @@ override this behavior, use [`Accounts.onCreateUser`](#accounts_oncreateuser).
 This function is only used for creating users with passwords. The external
 service login flows do not use this function.
 
+### Managing usernames and emails
+
+Instead of modifying documents in the [`Meteor.users`](#meteor_users) collection
+directly, use these convenience functions which correctly check for case
+insensitive duplicates before updates.
+
+{{> autoApiBox "Accounts.setUsername"}}
+
+{{> autoApiBox "Accounts.addEmail"}}
+
+By default, an email address is added with `{ verified: false }`. Use
+[`Accounts.sendVerificationEmail`](#Accounts-sendVerificationEmail) to send an
+email with a link the user can use verify their email address.
+
+{{> autoApiBox "Accounts.removeEmail"}}
+
+{{> autoApiBox "Accounts.verifyEmail"}}
+
+This function accepts tokens passed into the callback registered with
+[`Accounts.onEmailVerificationLink`](#Accounts-onEmailVerificationLink).
+
+{{> autoApiBox "Accounts.findUserByUsername"}}
+
+{{> autoApiBox "Accounts.findUserByEmail"}}
+
+### Managing passwords
+
+Use the below functions to initiate password changes or resets from the server
+or the client.
 
 {{> autoApiBox "Accounts.changePassword"}}
 
@@ -60,20 +95,19 @@ new password and call `resetPassword`.
 {{> autoApiBox "Accounts.resetPassword"}}
 
 This function accepts tokens passed into the callbacks registered with
-[`Accounts.onResetPasswordLink`](#Accounts-onResetPasswordLink) and
+[`AccountsClient#onResetPasswordLink`](#Accounts-onResetPasswordLink) and
 [`Accounts.onEnrollmentLink`](#Accounts-onEnrollmentLink).
 
 {{> autoApiBox "Accounts.setPassword"}}
 
-{{> autoApiBox "Accounts.verifyEmail"}}
 
-This function accepts tokens passed into the callback registered with
-[`Accounts.onEmailVerificationLink`](#Accounts-onEmailVerificationLink).
+
+<h3 id="sending-emails"><span>Sending emails</span></h3>
 
 {{> autoApiBox "Accounts.sendResetPasswordEmail"}}
 
 When the user visits the link in this email, the callback registered with
-[`Accounts.onResetPasswordLink`](#Accounts-onResetPasswordLink) will be called.
+[`AccountsClient#onResetPasswordLink`](#Accounts-onResetPasswordLink) will be called.
 
 To customize the contents of the email, see
 [`Accounts.emailTemplates`](#accounts_emailtemplates).
@@ -126,7 +160,7 @@ Override fields of the object by assigning to them:
    by the `emailTemplates.from` field.
  - `subject`: A `Function` that takes a user object and returns
    a `String` for the subject line of a reset password email.
- - `text`: A `Function` that takes a user object and a url, and
+ - `text`: An optional `Function` that takes a user object and a url, and
    returns the body text for a reset password email.
  - `html`: An optional `Function` that takes a user object and a
    url, and returns the body html for a reset password email.

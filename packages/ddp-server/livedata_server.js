@@ -580,7 +580,37 @@ _.extend(Session.prototype, {
         // reconnect.
         return;
 
+      // XXX It'd be much better if we had generic hooks where any package can
+      // hook into subscription handling, but in the mean while we special case
+      // ddp-rate-limiter package. This is also done for weak requirements to
+      // add the ddp-rate-limiter package in case we don't have Accounts. A
+      // user trying to use the ddp-rate-limiter must explicitly require it.
+      if (Package['ddp-rate-limiter']) {
+        var DDPRateLimiter = Package['ddp-rate-limiter'].DDPRateLimiter;
+        var rateLimiterInput = {
+          userId: self.userId,
+          clientAddress: self.connectionHandle.clientAddress,
+          type: "subscription",
+          name: msg.name,
+          connectionId: self.id
+        };
+
+        DDPRateLimiter._increment(rateLimiterInput);
+        var rateLimitResult = DDPRateLimiter._check(rateLimiterInput);
+        if (!rateLimitResult.allowed) {
+          self.send({
+            msg: 'nosub', id: msg.id,
+            error: new Meteor.Error(
+              'too-many-requests',
+              DDPRateLimiter.getErrorMessage(rateLimitResult),
+              {timeToReset: rateLimitResult.timeToReset})
+          });
+          return;
+        }
+      }
+
       var handler = self.server.publish_handlers[msg.name];
+
       self._startSubscription(handler, msg.id, msg.params, msg.name);
 
     },
@@ -644,28 +674,69 @@ _.extend(Session.prototype, {
         connection: self.connectionHandle,
         randomSeed: randomSeed
       });
-      try {
-        var result = DDPServer._CurrentWriteFence.withValue(fence, function () {
-          return DDP._CurrentInvocation.withValue(invocation, function () {
-            return maybeAuditArgumentChecks(
-              handler, invocation, msg.params, "call to '" + msg.method + "'");
-          });
-        });
-      } catch (e) {
-        var exception = e;
+
+      const promise = new Promise((resolve, reject) => {
+        // XXX It'd be better if we could hook into method handlers better but
+        // for now, we need to check if the ddp-rate-limiter exists since we
+        // have a weak requirement for the ddp-rate-limiter package to be added
+        // to our application.
+        if (Package['ddp-rate-limiter']) {
+          var DDPRateLimiter = Package['ddp-rate-limiter'].DDPRateLimiter;
+          var rateLimiterInput = {
+            userId: self.userId,
+            clientAddress: self.connectionHandle.clientAddress,
+            type: "method",
+            name: msg.method,
+            connectionId: self.id
+          };
+          DDPRateLimiter._increment(rateLimiterInput);
+          var rateLimitResult = DDPRateLimiter._check(rateLimiterInput)
+          if (!rateLimitResult.allowed) {
+            reject(new Meteor.Error(
+              "too-many-requests",
+              DDPRateLimiter.getErrorMessage(rateLimitResult),
+              {timeToReset: rateLimitResult.timeToReset}
+            ));
+            return;
+          }
+        }
+
+        resolve(DDPServer._CurrentWriteFence.withValue(
+          fence,
+          () => DDP._CurrentInvocation.withValue(
+            invocation,
+            () => maybeAuditArgumentChecks(
+              handler, invocation, msg.params,
+              "call to '" + msg.method + "'"
+            )
+          )
+        ));
+      });
+
+      function finish() {
+        fence.arm();
+        unblock();
       }
 
-      fence.arm(); // we're done adding writes to the fence
-      unblock(); // unblock, if the method hasn't done it already
+      const payload = {
+        msg: "result",
+        id: msg.id
+      };
 
-      exception = wrapInternalException(
-        exception, "while invoking method '" + msg.method + "'");
-
-      // send response and add to cache
-      var payload =
-        exception ? {error: exception} : (result !== undefined ?
-                                          {result: result} : {});
-      self.send(_.extend({msg: 'result', id: msg.id}, payload));
+      promise.then((result) => {
+        finish();
+        if (result !== undefined) {
+          payload.result = result;
+        }
+        self.send(payload);
+      }, (exception) => {
+        finish();
+        payload.error = wrapInternalException(
+          exception,
+          `while invoking method '${msg.method}'`
+        );
+        self.send(payload);
+      });
     }
   },
 
@@ -964,6 +1035,10 @@ _.extend(Subscription.prototype, {
     if (self._isDeactivated())
       return;
 
+    self._publishHandlerResult(res);
+  },
+
+  _publishHandlerResult: function (res) {
     // SPECIAL CASE: Instead of writing their own callbacks that invoke
     // this.added/changed/ready/etc, the user can just return a collection
     // cursor or array of cursors from the publish function; we call their
@@ -980,6 +1055,8 @@ _.extend(Subscription.prototype, {
     //       reactiveThingy.publishMe();
     //     });
     //   };
+
+    var self = this;
     var isCursor = function (c) {
       return c && c._publishCursor;
     };

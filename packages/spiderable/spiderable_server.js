@@ -13,7 +13,12 @@ var urlParser = Npm.require('url');
 // the _escaped_fragment_ protocol, so we need to hardcode a list
 // here. I shed a silent tear.
 Spiderable.userAgentRegExps = [
-    /^facebookexternalhit/i, /^linkedinbot/i, /^twitterbot/i];
+  /^facebookexternalhit/i,
+  /^Facebot/,
+  /^linkedinbot/i,
+  /^twitterbot/i,
+  /^slackbot-linkexpanding/i
+];
 
 // how long to let phantomjs run before we kill it (and send down the
 // regular page instead). Users may modify this number.
@@ -104,8 +109,8 @@ WebApp.connectHandlers.use(function (req, res, next) {
     // instead, but that meant we couldn't use exec and had to manage several
     // processes.)
     child_process.execFile(
-      '/bin/bash',
-      ['-c',
+      '/usr/bin/env',
+      ['bash', '-c',
        ("exec phantomjs " + phantomJsArgs + " /dev/stdin <<'END'\n" +
         phantomScript + "END\n")],
       {timeout: Spiderable.requestTimeoutMs, maxBuffer: MAX_BUFFER},
@@ -119,7 +124,7 @@ WebApp.connectHandlers.use(function (req, res, next) {
           if (error && error.code === 127)
             Meteor._debug("spiderable: phantomjs not installed. Download and install from http://phantomjs.org/");
           else
-            Meteor._debug("spiderable: phantomjs failed:", error, "\nstderr:", stderr, "\nstdout:", stdout);
+            Meteor._debug("spiderable: phantomjs failed at " + url + ":", error, "\nstderr:", stderr, "\nstdout:", stdout);
 
           next();
         }

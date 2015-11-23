@@ -35,7 +35,7 @@ WebApp.clientPrograms = {};
 // XXX maps archs to program path on filesystem
 var archPath = {};
 
-var bundledJsCssPrefix;
+var bundledJsCssUrlRewriteHook;
 
 var sha1 = function (contents) {
   var hash = crypto.createHash('sha1');
@@ -271,16 +271,11 @@ WebAppInternals.generateBoilerplateInstance = function (arch,
     additionalOptions.runtimeConfigOverrides || {}
   );
 
-  var jsCssPrefix;
-  if (arch === 'web.cordova') {
-    // in cordova we serve assets up directly from disk so it doesn't make
-    // sense to use the prefix (ordinarily something like a CDN) and go out
-    // to the internet for those files.
-    jsCssPrefix = '';
-  } else {
-    jsCssPrefix = bundledJsCssPrefix ||
-      __meteor_runtime_config__.ROOT_URL_PATH_PREFIX || '';
-  }
+  var jsCssUrlRewriteHook = bundledJsCssUrlRewriteHook || function (url) {
+    var bundledPrefix =
+       __meteor_runtime_config__.ROOT_URL_PATH_PREFIX || '';
+    return bundledPrefix + url;
+  };
 
   return new Boilerplate(arch, manifest,
     _.extend({
@@ -305,7 +300,7 @@ WebAppInternals.generateBoilerplateInstance = function (arch,
         meteorRuntimeConfig: JSON.stringify(
           encodeURIComponent(JSON.stringify(runtimeConfig))),
         rootUrlPathPrefix: __meteor_runtime_config__.ROOT_URL_PATH_PREFIX || '',
-        bundledJsCssPrefix: jsCssPrefix,
+        bundledJsCssUrlRewriteHook: jsCssUrlRewriteHook,
         inlineScriptsAllowed: WebAppInternals.inlineScriptsAllowed(),
         inline: additionalOptions.inline
       }
@@ -437,6 +432,15 @@ var getUrlPrefixForArch = function (arch) {
   // to Meteor internals.
   return arch === WebApp.defaultArch ?
     '' : '/' + '__' + arch.replace(/^web\./, '');
+};
+
+// parse port to see if its a Windows Server style named pipe. If so, return as-is (String), otherwise return as Int
+WebAppInternals.parsePort = function (port) {
+  if( /\\\\?.+\\pipe\\?.+/.test(port) ) {
+    return port;
+  }
+
+  return parseInt(port);
 };
 
 var runWebAppServer = function () {
@@ -659,11 +663,27 @@ var runWebAppServer = function () {
     if (request.url.query && request.url.query['meteor_css_resource']) {
       // In this case, we're requesting a CSS resource in the meteor-specific
       // way, but we don't have it.  Serve a static css file that indicates that
-      // we didn't have it, so we can detect that and refresh.
+      // we didn't have it, so we can detect that and refresh.  Make sure
+      // that any proxies or CDNs don't cache this error!  (Normally proxies
+      // or CDNs are smart enough not to cache error pages, but in order to
+      // make this hack work, we need to return the CSS file as a 200, which
+      // would otherwise be cached.)
       headers['Content-Type'] = 'text/css; charset=utf-8';
+      headers['Cache-Control'] = 'no-cache';
       res.writeHead(200, headers);
       res.write(".meteor-css-not-found-error { width: 0px;}");
       res.end();
+      return undefined;
+    }
+
+    if (request.url.query && request.url.query['meteor_js_resource']) {
+      // Similarly, we're requesting a JS resource that we don't have.
+      // Serve an uncached 404. (We can't use the same hack we use for CSS,
+      // because actually acting on that hack requires us to have the JS
+      // already!)
+      headers['Cache-Control'] = 'no-cache';
+      res.writeHead(404, headers);
+      res.end("404 Not Found");
       return undefined;
     }
 
@@ -739,7 +759,7 @@ var runWebAppServer = function () {
     WebAppInternals.generateBoilerplate();
 
     // only start listening after all the startup code has run.
-    var localPort = parseInt(process.env.PORT) || 0;
+    var localPort = WebAppInternals.parsePort(process.env.PORT) || 0;
     var host = process.env.BIND_IP;
     var localIp = host || '0.0.0.0';
     httpServer.listen(localPort, localIp, Meteor.bindEnvironment(function() {
@@ -774,9 +794,18 @@ WebAppInternals.setInlineScriptsAllowed = function (value) {
   WebAppInternals.generateBoilerplate();
 };
 
-WebAppInternals.setBundledJsCssPrefix = function (prefix) {
-  bundledJsCssPrefix = prefix;
+
+WebAppInternals.setBundledJsCssUrlRewriteHook = function (hookFn) {
+  bundledJsCssUrlRewriteHook = hookFn;
   WebAppInternals.generateBoilerplate();
+};
+
+WebAppInternals.setBundledJsCssPrefix = function (prefix) {
+  var self = this;
+  self.setBundledJsCssUrlRewriteHook(
+    function (url) {
+      return prefix + url;
+  });
 };
 
 // Packages can call `WebAppInternals.addStaticJs` to specify static
